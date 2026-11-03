@@ -3,10 +3,12 @@
 Fetch oil and gasoline market data, calibrate the pump-price model for every EIA
 region, and write public/data/market.json for the static site.
 
-Standard library only (Python 3.9+), so it runs locally and on GitHub Actions as-is:
+    python3 scripts/fetch_data.py              # full refresh: EIA history + calibration
+    python3 scripts/fetch_data.py --futures    # quick refresh: latest NYMEX quotes only
 
-    python3 scripts/fetch_data.py                   # EIA's shared DEMO_KEY (rate-limited)
-    EIA_API_KEY=your_key python3 scripts/fetch_data.py
+No API key is needed. The EIA API is tried with EIA_API_KEY (or EIA's public DEMO_KEY);
+when that is refused or rate-limited, the same series come from EIA's keyless bulk
+spreadsheets, which needs `pip install xlrd`. Everything else is standard library.
 
 The model
 ---------
@@ -64,11 +66,14 @@ SPOT = {
     "NYH": ("EER_EPMRU_PF4_Y35NY_DPG", "New York Harbor conventional gasoline"),
     "LA": ("EER_EPMRR_PF4_Y05LA_DPG", "Los Angeles RBOB gasoline"),
 }
-CRUDE_SPOT = {"WTI": "RWTC", "BRENT": "RBRTE"}
+EIA_BULK = {
+    "retail": "https://www.eia.gov/dnav/pet/xls/PET_PRI_GND_A_EPMR_PTE_DPGAL_W.xls",
+    "spot": "https://www.eia.gov/dnav/pet/xls/PET_PRI_SPT_S1_D.xls",
+}
 
-# Front-month futures on Yahoo Finance: root symbol and the day of the month after which
+# NYMEX RBOB gasoline on Yahoo Finance: root symbol and the day of the month after which
 # the nearest contract is about to expire (so we start from the following one).
-FUTURES = {"RBOB": ("RB", 26), "WTI": ("CL", 17), "BRENT": ("BZ", 26)}
+RBOB = ("RB", 26)
 MONTH_CODES = "FGHJKMNQUVXZ"
 
 # Wholesale hubs each region's benchmark may blend; weights come from the data.
@@ -92,6 +97,10 @@ def http_json(url, retries=3, timeout=40):
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.load(resp)
+        except urllib.error.HTTPError as err:
+            if err.code < 500 or attempt == retries - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
         except Exception:
             if attempt == retries - 1:
                 raise
@@ -126,22 +135,64 @@ def eia_rows(route, frequency, facets, start):
             return rows
 
 
-def fetch_retail(start):
-    """Weekly regular-gasoline pump prices, {area: {date: $/gal}}, plus area names."""
-    series, names = {}, {}
-    for r in eia_rows("petroleum/pri/gnd", "weekly", {"product": ["EPMR"]}, start):
-        if r.get("process") != "PTE" or r.get("value") in (None, ""):
+def eia_bulk(kind, start):
+    """{series_id: {date: value}} from one of EIA's keyless bulk spreadsheets."""
+    try:
+        import xlrd
+    except ImportError:
+        raise RuntimeError("the EIA API is unavailable and the keyless fallback needs xlrd: pip install xlrd")
+    req = urllib.request.Request(EIA_BULK[kind], headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        book = xlrd.open_workbook(file_contents=resp.read())
+    first = date.fromisoformat(start)
+    out = {}
+    for sheet in book.sheets():
+        if not sheet.name.startswith("Data"):
             continue
-        series.setdefault(r["duoarea"], {})[parse_day(r["period"])] = float(r["value"])
-        names[r["duoarea"]] = r["area-name"]
-    return series, names
+        ids = [str(sheet.cell_value(1, c)) for c in range(sheet.ncols)]
+        for r in range(3, sheet.nrows):
+            cell = sheet.cell_value(r, 0)
+            if not isinstance(cell, float):
+                continue
+            d = xlrd.xldate.xldate_as_datetime(cell, book.datemode).date()
+            if d < first:
+                continue
+            for c in range(1, sheet.ncols):
+                v = sheet.cell_value(r, c)
+                if isinstance(v, float):
+                    out.setdefault(ids[c], {})[d] = v
+    return out
+
+
+def fetch_retail(start):
+    """Weekly regular-gasoline pump prices, {area: {date: $/gal}}."""
+    series = {}
+    try:
+        rows = eia_rows("petroleum/pri/gnd", "weekly", {"product": ["EPMR"]}, start)
+    except Exception as err:
+        log(f"  EIA API unavailable ({err}); using EIA's keyless bulk download")
+        for sid, points in eia_bulk("retail", start).items():
+            parts = sid.split("_")  # EMM_EPMR_PTE_<area>_DPG
+            if len(parts) == 5 and parts[1] == "EPMR" and parts[2] == "PTE":
+                series[parts[3]] = points
+        return series
+    for r in rows:
+        if r.get("process") == "PTE" and r.get("value") not in (None, ""):
+            series.setdefault(r["duoarea"], {})[parse_day(r["period"])] = float(r["value"])
+    return series
 
 
 def fetch_spot(start):
-    """Daily spot prices for the gasoline hubs and crude benchmarks, {series_id: {date: price}}."""
-    ids = [sid for sid, _ in SPOT.values()] + list(CRUDE_SPOT.values())
+    """Daily spot prices at the gasoline hubs, {series_id: {date: $/gal}}."""
+    ids = [sid for sid, _ in SPOT.values()]
+    try:
+        rows = eia_rows("petroleum/pri/spt", "daily", {"series": ids}, start)
+    except Exception as err:
+        log(f"  EIA API unavailable ({err}); using EIA's keyless bulk download")
+        bulk = eia_bulk("spot", start)
+        return {sid: bulk.get(sid, {}) for sid in ids}
     out = {sid: {} for sid in ids}
-    for r in eia_rows("petroleum/pri/spt", "daily", {"series": ids}, start):
+    for r in rows:
         if r.get("value") not in (None, ""):
             out[r["series"]][parse_day(r["period"])] = float(r["value"])
     return out
@@ -437,48 +488,62 @@ def futures_snapshot(symbol, closes):
         "date": last.isoformat(),
         "price": round(closes[last], 4),
         "change5d": round(closes[last] - closes[prev], 4),
-        "spark": round_list([closes[d] for d in days[-45:]]),
     }
 
 
-def main():
+def now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def write_market(market):
+    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    tmp = OUT_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(market, f, separators=(",", ":"))
+    os.replace(tmp, OUT_PATH)
+    log(f"Wrote {OUT_PATH} ({os.path.getsize(OUT_PATH) / 1024:.0f} KB)")
+
+
+def ship_hubs(daily_by_hub, market):
+    """Put every hub on one calendar window so the browser can blend them index by index."""
+    through = min(max(daily) for daily in daily_by_hub.values())
+    first = through - timedelta(days=BENCH_DAYS - 1)
+    for key, daily in daily_by_hub.items():
+        market["hubs"][key]["values"] = round_list([daily[first + timedelta(days=i)] for i in range(BENCH_DAYS)])
+    market["hubStart"], market["hubThrough"] = first.isoformat(), through.isoformat()
+
+
+def full_refresh():
     today = datetime.now(timezone.utc).date()
     start = (today - timedelta(days=365 * HISTORY_YEARS)).isoformat()
     t_start = time.time()
 
     log("EIA: weekly pump prices ...")
-    retail, area_names = fetch_retail(start)
+    retail = fetch_retail(start)
     log(f"  {len(retail)} regions, latest survey {max(max(s) for s in retail.values())}")
     log("EIA: daily spot prices ...")
     spot = fetch_spot(start)
     for key, (sid, _) in SPOT.items():
         log(f"  {key}: {len(spot[sid])} days through {max(spot[sid])}")
 
-    futures = {}
-    for name, (root, roll_day) in FUTURES.items():
-        symbol, closes = front_contract(root, roll_day, today)
-        if symbol:
-            futures[name] = (symbol, closes)
-            log(f"Yahoo: {name} {symbol} {max(closes)} {closes[max(closes)]:.4f}")
-        else:
-            log(f"Yahoo: {name} unavailable, wholesale stops at EIA's last spot print")
+    symbol, rbob = front_contract(*RBOB, today)
+    if symbol:
+        log(f"Yahoo: RBOB {symbol} {max(rbob)} {rbob[max(rbob)]:.4f}")
+    else:
+        log("Yahoo: RBOB unavailable, wholesale stops at EIA's last spot print")
 
-    rbob = futures.get("RBOB", (None, {}))[1]
-    hubs, hub_meta, spot_through = {}, {}, {}
-    for key, (sid, name) in SPOT.items():
-        extended, spot_through[key] = extend_with_futures(spot[sid], rbob)
-        hubs[key] = fill_calendar(extended)
-    # All hubs ship on one calendar so the browser can blend them index by index.
-    through = min(max(daily) for daily in hubs.values())
-    first = through - timedelta(days=BENCH_DAYS - 1)
+    market = {"hubs": {}}
+    hubs = {}
     biz = sorted(set.intersection(*(set(spot[sid]) for sid, _ in SPOT.values())))[-(SHOCK_DAYS + 1):]
     for key, (sid, name) in SPOT.items():
-        hub_meta[key] = {
+        extended, spot_through = extend_with_futures(spot[sid], rbob)
+        hubs[key] = fill_calendar(extended)
+        market["hubs"][key] = {
             "name": name,
-            "spotThrough": spot_through[key].isoformat(),
-            "values": round_list([hubs[key][first + timedelta(days=i)] for i in range(BENCH_DAYS)]),
+            "spotThrough": spot_through.isoformat(),
             "shocks": round_list([spot[sid][d1] - spot[sid][d0] for d0, d1 in zip(biz, biz[1:])]),
         }
+    ship_hubs(hubs, market)
 
     areas = {}
     for area_id in sorted(retail):
@@ -491,7 +556,6 @@ def main():
         days = sorted(retail[area_id])[-CHART_WEEKS:]
         bt = params["backtest"] or {}
         areas[area_id] = {
-            "name": area_names.get(area_id, area_id),
             "weights": params["weights"],
             "a": round(params["a"], 4),
             "b": round(params["b"], 4),
@@ -501,8 +565,6 @@ def main():
             "sigma": round(params["sigma"], 4),
             "rho": round(params["rho"], 3),
             "surprise": round(params["surprise"], 4),
-            "halfLifeUp": round(half_life(params["ku"]), 1),
-            "halfLifeDown": round(half_life(params["kd"]), 1),
             "backtest": params["backtest"],
             "retail": [[d.isoformat(), retail[area_id][d]] for d in days],
         }
@@ -513,35 +575,54 @@ def main():
             f"sigma={params['sigma'] * 100:.1f}c  backtest model={bt.get('maeModel', 0) * 100:.1f}c "
             f"naive={bt.get('maeNaive', 0) * 100:.1f}c dir={bt.get('directionHit')}  [{time.time() - t0:.1f}s]")
 
-    crude = {}
-    for name, sid in CRUDE_SPOT.items():
-        days = sorted(spot[sid])
-        crude[name] = {"spotDate": days[-1].isoformat(), "spot": spot[sid][days[-1]]}
-
-    out = {
-        "generated": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    market.update({
+        "generated": now_iso(),
+        "calibrated": now_iso(),
         "latestSurvey": max(max(s) for s in retail.values()).isoformat(),
-        "futures": {name: futures_snapshot(sym, closes) for name, (sym, closes) in futures.items()},
-        "crudeSpot": crude,
-        "hubStart": first.isoformat(),
-        "hubThrough": through.isoformat(),
-        "hubs": hub_meta,
+        "futures": {"RBOB": futures_snapshot(symbol, rbob)} if symbol else {},
         "areas": areas,
-    }
-    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
-    tmp = OUT_PATH + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(out, f, separators=(",", ":"))
-    os.replace(tmp, OUT_PATH)
-    log(f"Wrote {OUT_PATH} ({os.path.getsize(OUT_PATH) / 1024:.0f} KB) in {time.time() - t_start:.0f}s")
+    })
+    write_market(market)
+    log(f"Full refresh done in {time.time() - t_start:.0f}s")
+
+
+def futures_refresh():
+    """Re-extend every hub past EIA's last spot print with the latest RBOB quotes.
+    Runs in seconds and makes no EIA calls, so it can run every few minutes."""
+    with open(OUT_PATH) as f:
+        market = json.load(f)
+    today = datetime.now(timezone.utc).date()
+    symbol, rbob = front_contract(*RBOB, today)
+    if not symbol:
+        raise RuntimeError("no RBOB quotes")
+    start = date.fromisoformat(market["hubStart"])
+    hubs = {}
+    for key, hub in market["hubs"].items():
+        spot_through = date.fromisoformat(hub["spotThrough"])
+        if spot_through < min(rbob):
+            raise RuntimeError(f"RBOB history doesn't reach back to the {key} spot print")
+        spot = {start + timedelta(days=i): v for i, v in enumerate(hub["values"])
+                if start + timedelta(days=i) <= spot_through}
+        extended, _ = extend_with_futures(spot, rbob)
+        hubs[key] = fill_calendar(extended)
+    if min(max(daily) for daily in hubs.values()) - timedelta(days=BENCH_DAYS - 1) < start:
+        raise RuntimeError("latest RBOB quote is older than the shipped data")
+    ship_hubs(hubs, market)
+    market["futures"] = {"RBOB": futures_snapshot(symbol, rbob)}
+    market["generated"] = now_iso()
+    write_market(market)
+    log(f"Futures refresh: RBOB {symbol} {max(rbob)} {rbob[max(rbob)]:.4f}, hubs through {market['hubThrough']}")
+
+
+def main():
+    if "--futures" in sys.argv[1:] and os.path.exists(OUT_PATH):
+        try:
+            futures_refresh()
+            return
+        except Exception as err:
+            log(f"Quick refresh not possible ({err}); running the full refresh")
+    full_refresh()
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except urllib.error.HTTPError as err:
-        if err.code in (403, 429) and "api.eia.gov" in err.url:
-            sys.exit(f"EIA API refused the request (HTTP {err.code}). The shared DEMO_KEY is rate-limited; "
-                     "get a free key at https://www.eia.gov/opendata/register.php and set EIA_API_KEY. "
-                     "The existing data file was left unchanged.")
-        raise
+    main()

@@ -46,10 +46,6 @@ const PADD = {
 };
 const STATE_PADD = Object.fromEntries(Object.entries(PADD).flatMap(([id, states]) => states.map((s) => [s, id])));
 
-// Great Lakes markets known for Edgeworth price cycles (sharp jumps, slow declines).
-export const CYCLING_STATES = new Set(["OH", "MI", "IN", "IL", "WI", "KY"]);
-export const REMOTE_STATES = new Set(["HI", "AK"]);
-
 export function isZip(text) {
   return /^\d{5}$/.test(text);
 }

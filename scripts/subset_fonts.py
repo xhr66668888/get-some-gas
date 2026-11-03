@@ -18,7 +18,7 @@ from fontTools import subset
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(ROOT, "public", "assets", "fonts")
-WEIGHTS = ("Light", "Regular", "Medium", "Bold")
+WEIGHTS = ("Regular", "Medium", "Bold")
 TEXT_SOURCES = ("public/js/i18n.js", "public/index.html", "public/js/app.js")
 
 # Latin, Latin-1, punctuation, currency, arrows and the symbols the UI prints.

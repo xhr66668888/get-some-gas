@@ -1,14 +1,13 @@
 # Get Some Gas
 
-**这周哪天加油最便宜？** 加油站的价格会跟着国际油价和批发汽油价格变动，但要晚几天到几周。本站每天抓取 EIA 和 NYMEX 的数据，为每个地区校准一个“涨快跌慢”模型，预测未来 7 天的加油站平均价格，并告诉你本周哪天加油最便宜。输入邮编可以得到本地预测；页面支持中英文切换，设计沿用 Panshaker 官网的配色和字体。
+**这周哪天加油最便宜？** 输入邮编，网站告诉你本周哪天（周几、几号）加油最便宜，能省多少钱，并显示油价走势。预测基于国际油价和批发汽油价格：加油站价格会跟着它们变动，只是晚几天到几周。
 
-Gas prices follow oil and wholesale gasoline, a few days to a few weeks late. This site
-uses that delay to forecast the average pump price in your area for the next 7 days and
-tells you which day this week is likely to be cheapest.
+Enter a ZIP code and the site tells you which day this week gas will be cheapest near you,
+how much that saves on a fill-up, and the recent price trend.
 
-## How the forecast works
+## How it works
 
-For each of EIA's 29 survey regions (U.S., PADDs, 9 states, 10 cities):
+For each of EIA's 29 pump-price survey regions (U.S., PADDs, 9 states, 10 cities):
 
 ```
 target(d) = a + b × wholesale(d − lag)
@@ -16,78 +15,73 @@ pump(d)   = pump(d−1) + k × [target(d) − pump(d−1)]     k = k_up if targe
 forecast  = pump + ρ × last week's miss
 ```
 
-- **wholesale** is a blend of EIA daily spot prices at the Gulf Coast, New York Harbor and
-  Los Angeles hubs. The blend weights are picked per region by fit, and the last few days
-  are filled in from NYMEX futures, always using one contract so roll gaps can't leak in.
-- **k_up > k_down** is the "rockets and feathers" asymmetry: increases reach the pump faster
-  than decreases.
-- The margin **a** leans on the last few months, because margins drift with the market.
-- **ρ** carries part of last week's miss into this week, because misses tend to persist.
-- Future wholesale prices are simulated as a random walk built from recent daily moves
-  (3,000 paths). That gives the 80% ranges and each day's chance of being the cheapest.
-  A small day-of-week pattern is added on top (GasBuddy: Monday cheapest, Thursday–Friday
-  priciest).
+- **wholesale** blends EIA daily spot prices at the Gulf Coast, New York Harbor and Los
+  Angeles hubs, weighted by fit for each region. The days since EIA's last spot print are
+  filled in from the live NYMEX RBOB gasoline future, always using one contract so roll
+  gaps can't leak in.
+- **k_up > k_down**: increases reach the pump faster than decreases.
+- The margin **a** leans on recent months, and **ρ** carries part of last week's miss into
+  this week. Both cut out-of-sample error.
+- Future wholesale prices are simulated as a random walk built from recent daily moves.
+  The best day is the one with the lowest expected price. A small day-of-week pattern is
+  added on top: Monday is typically cheapest, Thursday–Friday priciest (GasBuddy).
 
-**Why 7 days:** wholesale moves that have already happened take one to two weeks to reach
-the pump, so the next few days are predictable. Beyond that, the forecast mostly depends
-on where oil goes next.
+**Accuracy:** in an out-of-sample backtest over the latest 52 weeks, the model beat
+"assume no change" in all 29 regions. For the U.S. average it missed by 5.6¢ on average
+(vs 7.8¢) and called the direction of the weekly move 89% of the time.
 
-**Track record:** an out-of-sample backtest over the latest 52 weeks, with dynamics and hub
-weights fit only on earlier data. On data through Oct 26, 2026, the model beat "assume no
-change" in all 29 regions. For the U.S. average it missed by 5.6¢ on average (vs 7.8¢)
-and called the direction 89% of the time. Each region's numbers are shown on the page.
+## Live data
 
-## Project layout
+`.github/workflows/refresh-data.yml` keeps prices current with no API key to set up:
 
-```
-public/                 static site, no build step
-  index.html
-  assets/css/style.css  Panshaker look: brand blue #0E427E, green #62BA46, Smartisan Compact
-  assets/fonts/         Smartisan Compact subset to the glyphs the site uses (~80 KB per weight)
-  js/engine.js          forecast engine (same recursion as the Python calibration)
-  js/regions.js         ZIP → state → most specific EIA survey (city, state, PADD, U.S.)
-  js/i18n.js            English and Simplified Chinese copy
-  js/chart.js           SVG chart and table view
-  js/app.js             page logic
-  data/market.json      market data and fitted parameters (generated)
-scripts/
-  fetch_data.py         fetch EIA and Yahoo Finance data, calibrate, backtest, write market.json
-  serve.py              local static server
-  subset_fonts.py       rebuild the font subsets after changing Chinese copy
-.github/workflows/refresh-data.yml   weekday refresh of market.json
-```
+- **Full refresh:** EIA history plus recalibration, on every push to `main` and each
+  weekday at 22:30 UTC (after EIA's Monday survey release and the NYMEX settle).
+- **Quick refresh:** the latest NYMEX gasoline quote, every 30 minutes from 12:00 to 22:00
+  UTC on weekdays.
 
-## Run it locally
+Each run force-pushes `market.json` to the `data` branch, which the page loads from
+`raw.githubusercontent.com`, so new prices appear without a redeploy. The copy in
+`public/data/` is the fallback. The page re-checks every 10 minutes while open.
 
-Needs Python 3.9+ and nothing else.
+EIA data comes from the EIA API using the `EIA_API_KEY` repository secret if you add one,
+otherwise EIA's public `DEMO_KEY`. When the API refuses or rate-limits the request, the
+same series come from EIA's keyless bulk spreadsheets.
 
-```bash
-python3 scripts/fetch_data.py        # refresh public/data/market.json (~10 s)
-python3 scripts/serve.py             # http://127.0.0.1:8765/
-```
-
-`fetch_data.py` uses EIA's shared `DEMO_KEY` by default, which is rate-limited and fails
-with HTTP 429 after a handful of calls. Get a free key at
-https://www.eia.gov/opendata/register.php and run with `EIA_API_KEY=your_key`. If a fetch
-fails, the existing `market.json` is left as it is.
+GitHub pauses scheduled workflows in repositories with no activity for 60 days; re-enable
+it from the Actions tab if that happens.
 
 ## Deploy
 
-`public/` is a plain static site: Azure Static Web Apps (like the Panshaker site), GitHub
-Pages, Netlify and similar hosts all work, with `public` as the app folder and no build
-command.
+Serve `public/` as a static site. It needs no build step, server or API key, and works on
+Vercel, Netlify, Cloudflare Pages, Azure Static Web Apps or similar.
 
-To keep the data fresh, the GitHub Actions workflow re-runs `fetch_data.py` every weekday
-at 23:00 UTC and commits `market.json` when it changes. That commit triggers your host's
-redeploy. Setup:
+If you fork or rename the repository, update `DATA_SOURCES` at the top of `public/js/app.js`
+to point at your own `data` branch.
 
-1. Add an `EIA_API_KEY` repository secret.
-2. Under Settings → Actions → General, set workflow permissions to "Read and write".
+## Run locally
 
-## Fonts
+```bash
+pip install xlrd                       # only needed if the EIA API refuses the demo key
+python3 scripts/fetch_data.py          # full refresh (~10 s)
+python3 scripts/fetch_data.py --futures   # quick refresh (~2 s)
+python3 scripts/serve.py               # http://127.0.0.1:8765/
+```
 
-The Smartisan Compact TTFs are ~8 MB each because they include every CJK glyph. The site
-ships subsets. After changing Chinese text, rebuild them:
+## Files
+
+```
+public/index.html, assets/        page, styles, Smartisan Compact subset, icon
+public/js/engine.js               forecast engine (same recursion as the Python calibration)
+public/js/regions.js              ZIP → most specific EIA survey (city, state, PADD, U.S.)
+public/js/chart.js                price trend chart
+public/js/app.js                  page logic and data loading
+public/js/i18n.js                 English and Chinese text
+scripts/fetch_data.py             fetch, calibrate, backtest, write market.json
+scripts/subset_fonts.py           rebuild the font subsets after changing Chinese text
+scripts/serve.py                  local static server
+```
+
+Rebuild the fonts after editing Chinese text:
 
 ```bash
 pip install fonttools brotli
@@ -96,11 +90,8 @@ python3 scripts/subset_fonts.py ../panshaker-official-websites-legacy-main/asset
 
 ## Limits
 
-- Forecasts are regional averages, not the price at a particular station.
-- Great Lakes markets (OH, MI, IN, IL, WI, KY) have Edgeworth price cycles: overnight jumps
-  of 10–40¢ the model can't time. The page flags this for those states.
-- Colorado, Denver and Chicago follow the coastal hubs least closely and have the weakest
-  backtest numbers. The page shows each region's own track record.
-- Data sources: EIA (public domain) and Yahoo Finance's unofficial chart endpoint for
-  futures. If Yahoo blocks requests, the forecast falls back to EIA spot prices, which
-  are up to a week old.
+- Forecasts are regional averages; individual stations can differ by 20¢ or more.
+- Great Lakes markets (OH, MI, IN, IL, WI, KY) have sudden price-cycle jumps the model
+  can't time, and Colorado, Denver and Chicago track the coastal hubs least closely.
+- NYMEX quotes come from Yahoo Finance's unofficial chart endpoint. If it's unavailable,
+  wholesale prices fall back to EIA spot prices, which can be up to a week old.

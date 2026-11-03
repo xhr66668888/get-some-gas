@@ -6,15 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="format-detection" content="telephone=no">
     <title>Get Some Gas — when to fill up this week</title>
-    <meta name="description"
-        content="Pump prices follow oil and wholesale gasoline a few days late. Get Some Gas forecasts your local gas price for the next 7 days and tells you the cheapest day to fill up.">
+    <meta name="description" content="Enter your ZIP code and see which day this week gas will be cheapest near you.">
     <meta property="og:type" content="website">
     <meta property="og:title" content="Get Some Gas — when to fill up this week">
-    <meta property="og:description"
-        content="A 7-day gas price forecast for your ZIP code, built from oil, wholesale gasoline and EIA pump-price data.">
+    <meta property="og:description" content="Enter your ZIP code and see which day this week gas will be cheapest near you.">
     <meta name="theme-color" content="#0E427E">
     <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
-    <link rel="preload" href="assets/fonts/SmartisanCompact-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/fonts/SmartisanCompact-Bold.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="assets/css/style.css">
     <script type="module" src="js/app.js"></script>
 </head>
@@ -23,7 +21,7 @@
 
     <header class="site-header">
         <div class="container nav-inner">
-            <a href="#top" class="logo" aria-label="Get Some Gas">
+            <a href="./" class="logo" aria-label="Get Some Gas">
                 <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true">
                     <rect x="5" y="4" width="15" height="24" rx="3" fill="#0E427E" />
                     <rect x="8.5" y="8" width="8" height="6" rx="1.2" fill="#fff" />
@@ -33,214 +31,54 @@
                 </svg>
                 <span class="logo-text">Get Some <span>Gas</span></span>
             </a>
-            <nav class="nav-links" aria-label="Sections">
-                <a href="#forecast" data-i18n="nav.forecast">Forecast</a>
-                <a href="#why" data-i18n="nav.why">Why</a>
-                <a href="#market" data-i18n="nav.market">Market</a>
-                <a href="#method" data-i18n="nav.method">How it works</a>
-            </nav>
             <button type="button" class="lang-toggle" id="lang-toggle" data-i18n="nav.lang">中文</button>
         </div>
     </header>
 
-    <section class="hero" id="top">
-        <canvas class="hero-canvas" id="hero-canvas" aria-hidden="true"></canvas>
-        <div class="container hero-content">
-            <p class="hero-kicker" data-i18n="hero.kicker">Gas price timing · next 7 days</p>
-            <h1>
-                <span data-i18n="hero.line">Gas prices follow oil, just a few days late.</span>
-                <strong data-i18n="hero.title">When should you fill up this week?</strong>
-            </h1>
-            <p class="hero-sub" data-i18n="hero.sub"></p>
-            <form class="zip-form" id="zip-form" novalidate>
-                <label class="visually-hidden" for="zip-input" data-i18n="hero.zipLabel">Your ZIP code</label>
-                <input id="zip-input" class="zip-input" name="zip" type="text" inputmode="numeric"
-                    autocomplete="postal-code" maxlength="5" data-i18n-placeholder="hero.zipPlaceholder"
-                    placeholder="ZIP code, e.g. 92122">
-                <button type="submit" class="btn" data-i18n="hero.cta">Check my week</button>
-            </form>
-            <p class="zip-status" id="zip-status" role="status" aria-live="polite"></p>
-            <ul class="badges">
-                <li class="badge" data-i18n="hero.badge1"></li>
-                <li class="badge" data-i18n="hero.badge2"></li>
-                <li class="badge" data-i18n="hero.badge3"></li>
-                <li class="badge" data-i18n="hero.badge4"></li>
-            </ul>
-        </div>
-    </section>
-
     <main>
-        <section class="section forecast" id="forecast">
-            <div class="container">
-                <div class="section-head">
-                    <h2 id="forecast-title"></h2>
-                    <p class="section-sub" id="area-line"></p>
-                </div>
-                <p class="notice" id="notice" hidden></p>
-
-                <article class="verdict" id="verdict" aria-live="polite">
-                    <div class="verdict-main">
-                        <p class="verdict-label" data-i18n="verdict.label"></p>
-                        <h3 class="verdict-headline" id="verdict-headline"></h3>
-                        <p class="verdict-reason" id="verdict-reason"></p>
-                        <p class="verdict-chip" id="verdict-chip"></p>
-                    </div>
-                    <div class="verdict-side">
-                        <div class="verdict-prices">
-                            <div class="verdict-price">
-                                <span class="verdict-price-label" id="vp-a-label"></span>
-                                <span class="verdict-price-value" id="vp-a"></span>
-                            </div>
-                            <div class="verdict-delta" id="vp-delta"></div>
-                            <div class="verdict-price">
-                                <span class="verdict-price-label" id="vp-b-label"></span>
-                                <span class="verdict-price-value" id="vp-b"></span>
-                            </div>
-                        </div>
-                        <div class="verdict-savings">
-                            <p id="verdict-savings"></p>
-                            <label class="tank">
-                                <span data-i18n="tank.label"></span>
-                                <select id="tank-select"></select>
-                            </label>
-                        </div>
-                    </div>
-                </article>
-
-                <div class="block-head">
-                    <h3 data-i18n="week.title"></h3>
-                    <p data-i18n="week.sub"></p>
-                </div>
-                <ol class="week" id="week"></ol>
-
-                <div class="chart-card">
-                    <div class="block-head">
-                        <h3 data-i18n="chart.title"></h3>
-                        <p data-i18n="chart.sub"></p>
-                    </div>
-                    <ul class="legend">
-                        <li><span class="key key-pump"></span><span data-i18n="chart.pump"></span></li>
-                        <li><span class="key key-forecast"></span><span data-i18n="chart.forecast"></span></li>
-                        <li><span class="key key-target"></span><span data-i18n="chart.target"></span></li>
-                    </ul>
-                    <div class="chart" id="chart"></div>
-                    <details class="chart-details">
-                        <summary data-i18n="chart.table"></summary>
-                        <div class="table-wrap" id="chart-table"></div>
-                    </details>
-                </div>
+        <section class="hero">
+            <canvas class="hero-canvas" id="hero-canvas" aria-hidden="true"></canvas>
+            <div class="container narrow hero-content">
+                <h1 data-i18n="hero.title">When should you fill up this week?</h1>
+                <form class="zip-form" id="zip-form" novalidate>
+                    <label class="visually-hidden" for="zip-input" data-i18n="hero.zipLabel">ZIP code</label>
+                    <input id="zip-input" class="zip-input" name="zip" type="text" inputmode="numeric"
+                        autocomplete="postal-code" maxlength="5" data-i18n-placeholder="hero.zipPlaceholder"
+                        placeholder="Enter ZIP code, e.g. 92122">
+                    <button type="submit" class="btn" data-i18n="hero.cta">Go</button>
+                </form>
+                <p class="zip-status" id="zip-status" role="status" aria-live="polite"></p>
             </div>
         </section>
 
-        <section class="section why" id="why">
-            <div class="container">
-                <div class="section-head center">
-                    <h2 data-i18n="why.title"></h2>
-                    <p class="section-sub" data-i18n="why.sub"></p>
+        <section class="result container narrow" id="result" hidden>
+            <article class="answer" aria-live="polite">
+                <p class="answer-place" id="answer-place"></p>
+                <p class="answer-label" data-i18n="answer.label"></p>
+                <h2 class="answer-day">
+                    <span class="answer-weekday" id="answer-weekday"></span>
+                    <span class="answer-date" id="answer-date"></span>
+                </h2>
+                <p class="answer-price" id="answer-price"></p>
+                <div class="answer-save">
+                    <label class="gallons" for="gallons">
+                        <span data-i18n="answer.fill"></span>
+                        <input id="gallons" type="number" inputmode="numeric" min="1" max="999" step="1" value="15">
+                        <span data-i18n="answer.gallons"></span>
+                    </label>
+                    <strong class="answer-amount" id="answer-save"></strong>
                 </div>
-                <div class="why-grid" id="why-grid"></div>
-                <p class="track" id="track" hidden></p>
-            </div>
-        </section>
+            </article>
 
-        <section class="section market" id="market">
-            <div class="container">
-                <div class="section-head">
-                    <h2 data-i18n="market.title"></h2>
-                    <p class="section-sub" data-i18n="market.sub"></p>
-                </div>
-                <div class="stat-grid" id="stat-grid"></div>
-            </div>
-        </section>
-
-        <section class="section method" id="method">
-            <div class="container">
-                <div class="section-head center">
-                    <h2 data-i18n="method.title"></h2>
-                    <p class="section-sub" data-i18n="method.sub"></p>
-                    <div class="divider"></div>
-                </div>
-                <ol class="flow">
-                    <li class="flow-step">
-                        <span class="flow-num">1</span>
-                        <h3 data-i18n="method.s1.title"></h3>
-                        <p data-i18n="method.s1.body"></p>
-                        <span class="flow-lag" data-i18n="method.s1.lag"></span>
-                    </li>
-                    <li class="flow-step">
-                        <span class="flow-num">2</span>
-                        <h3 data-i18n="method.s2.title"></h3>
-                        <p data-i18n="method.s2.body"></p>
-                        <span class="flow-lag" data-i18n="method.s2.lag"></span>
-                    </li>
-                    <li class="flow-step">
-                        <span class="flow-num">3</span>
-                        <h3 data-i18n="method.s3.title"></h3>
-                        <p data-i18n="method.s3.body"></p>
-                        <span class="flow-lag" data-i18n="method.s3.lag"></span>
-                    </li>
-                    <li class="flow-step is-last">
-                        <span class="flow-num">4</span>
-                        <h3 data-i18n="method.s4.title"></h3>
-                        <p data-i18n="method.s4.body"></p>
-                        <span class="flow-lag" data-i18n="method.s4.lag"></span>
-                    </li>
-                </ol>
-
-                <div class="method-grid">
-                    <div class="method-text">
-                        <h3 data-i18n="method.model.title"></h3>
-                        <p data-i18n="method.model.p1"></p>
-                        <div class="equation">
-                            <code>target(d) = a + b × wholesale(d − lag)</code>
-                            <code>pump(d) = pump(d−1) + k × [target(d) − pump(d−1)]</code>
-                            <code>k = k<sub>up</sub> if target &gt; pump, else k<sub>down</sub></code>
-                            <code>forecast = pump + ρ × ε(last week)</code>
-                        </div>
-                        <p data-i18n="method.model.p2"></p>
-                        <p data-i18n="method.model.p2b"></p>
-                        <p data-i18n="method.model.p3"></p>
-                    </div>
-                    <div class="method-side">
-                        <h3 id="params-title"></h3>
-                        <table class="params-table" id="params-table"></table>
-                        <h3 data-i18n="method.sources.title"></h3>
-                        <ul class="sources">
-                            <li><a href="https://www.eia.gov/petroleum/gasdiesel/" target="_blank" rel="noopener"
-                                    data-i18n="method.sources.s1"></a></li>
-                            <li><a href="https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm" target="_blank"
-                                    rel="noopener" data-i18n="method.sources.s2"></a></li>
-                            <li><a href="https://www.cmegroup.com/markets/energy/refined-products/rbob-gasoline.html"
-                                    target="_blank" rel="noopener" data-i18n="method.sources.s3"></a></li>
-                            <li><a href="https://www.gasbuddy.com/go/gasbuddy-reveals-the-best-day-of-week-to-buy-gas/"
-                                    target="_blank" rel="noopener" data-i18n="method.sources.s4"></a></li>
-                        </ul>
-                        <p class="disclaimer" data-i18n="method.disclaimer"></p>
-                    </div>
-                </div>
-            </div>
+            <article class="trend">
+                <h3 data-i18n="chart.title"></h3>
+                <div class="chart" id="chart"></div>
+            </article>
         </section>
     </main>
 
-    <footer>
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-col">
-                    <h4>Get Some Gas</h4>
-                    <p data-i18n="footer.about"></p>
-                </div>
-                <div class="footer-col">
-                    <h4 data-i18n="footer.data"></h4>
-                    <ul id="footer-data"></ul>
-                </div>
-                <div class="footer-col">
-                    <h4 data-i18n="footer.fine"></h4>
-                    <p data-i18n="method.disclaimer"></p>
-                    <p data-i18n="footer.note"></p>
-                </div>
-            </div>
-            <div class="copyright" id="copyright"></div>
-        </div>
+    <footer class="site-footer">
+        <p id="updated"></p>
     </footer>
 
 </body>
