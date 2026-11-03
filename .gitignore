@@ -1,0 +1,7 @@
+# Design reference, kept beside this project but not part of it
+panshaker-official-websites-legacy-main/
+
+__pycache__/
+*.pyc
+*.tmp
+.DS_Store
